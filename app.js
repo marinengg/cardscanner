@@ -36,6 +36,7 @@ const Settings = {
 /* ---------- view routing ---------- */
 
 function showView(id) {
+  if (id !== "view-scan" && typeof stopActiveStream === "function") stopActiveStream();
   $$(".view").forEach((v) => v.classList.remove("active"));
   $("#" + id).classList.add("active");
   $$(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === id));
@@ -198,16 +199,20 @@ async function extractCardFields(frontBase64Jpeg, backBase64Jpeg) {
 
 /* ---------- SCAN VIEW ---------- */
 
-let captureStage = null; // "front" | "back" — which photo cameraInput's next result is for
+let captureStage = null; // "front" | "back" — which photo we're currently capturing
 let pendingFrontPhotoDataUrl = null;
 let pendingBackPhotoDataUrl = null;
 let pendingFields = null;
+let activeStream = null;
+let currentFacingMode = "environment";
 
 function resetScanView() {
   captureStage = null;
   pendingFrontPhotoDataUrl = null;
   pendingBackPhotoDataUrl = null;
   pendingFields = null;
+  currentFacingMode = "environment";
+  stopActiveStream();
   $("#scanContent").innerHTML = `
     <div class="status-msg">
       <div style="font-size:40px; margin-bottom:10px;">📇</div>
@@ -222,7 +227,116 @@ function resetScanView() {
       return;
     }
     captureStage = "front";
-    $("#cameraInput").click();
+    openCameraView("Position the FRONT of the card in frame");
+  });
+}
+
+function stopActiveStream() {
+  if (activeStream) {
+    activeStream.getTracks().forEach((t) => t.stop());
+    activeStream = null;
+  }
+}
+
+/* ---- live camera view (defaults to back camera; flip + gallery fallback) ---- */
+
+async function openCameraView(promptLabel) {
+  $("#scanContent").innerHTML = `
+    <div class="camera-wrap"><video id="cameraVideo" autoplay playsinline muted></video></div>
+    <div class="camera-controls">
+      <button class="btn-icon" id="galleryBtn" title="Choose from gallery">🖼</button>
+      <button class="shutter-btn" id="shutterBtn" aria-label="Capture"></button>
+      <button class="btn-icon" id="flipCameraBtn" title="Flip camera">🔄</button>
+    </div>
+    <div class="hint" style="text-align:center; margin-top:0;">${escapeHtml(promptLabel)}</div>
+  `;
+  $("#galleryBtn").addEventListener("click", () => { stopActiveStream(); $("#galleryInput").click(); });
+
+  try {
+    activeStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: currentFacingMode } },
+      audio: false
+    });
+  } catch (err) {
+    $("#scanContent").innerHTML = `
+      <div class="status-msg error">⚠ Couldn't open the camera (${escapeHtml(err.message || err.name || "permission denied")}).</div>
+      <button class="btn btn-primary" id="galleryFallbackBtn">Choose photo from gallery instead</button>
+      <button class="btn btn-secondary" id="retryCameraBtn" style="margin-top:10px;">Try camera again</button>
+    `;
+    $("#galleryFallbackBtn").addEventListener("click", () => $("#galleryInput").click());
+    $("#retryCameraBtn").addEventListener("click", () => openCameraView(promptLabel));
+    return;
+  }
+
+  const video = $("#cameraVideo");
+  if (!video) { stopActiveStream(); return; } // user navigated away while permission prompt was open
+  video.srcObject = activeStream;
+
+  $("#flipCameraBtn").addEventListener("click", () => {
+    currentFacingMode = currentFacingMode === "environment" ? "user" : "environment";
+    stopActiveStream();
+    openCameraView(promptLabel);
+  });
+  $("#shutterBtn").addEventListener("click", () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    stopActiveStream();
+    showCropStep(canvas.toDataURL("image/jpeg", 0.92), promptLabel);
+  });
+}
+
+$("#galleryInput").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const promptLabel = captureStage === "back" ? "Position the BACK of the card in frame" : "Position the FRONT of the card in frame";
+  try {
+    const rawDataUrl = await readFileAsDataUrl(file);
+    showCropStep(rawDataUrl, promptLabel);
+  } catch (err) {
+    toast("Couldn't read that photo — try again");
+  }
+});
+
+/* ---- optional crop step ---- */
+
+function showCropStep(rawDataUrl, promptLabel) {
+  $("#scanContent").innerHTML = `
+    <div class="crop-wrap"><img id="cropImage" src="${rawDataUrl}"></div>
+    <div class="hint">Drag the corners to trim to just the card, or skip to keep the full photo.</div>
+    <button class="btn btn-primary" id="useCropBtn">Use this crop</button>
+    <div class="btn-row" style="margin-top:10px;">
+      <button class="btn btn-secondary" id="skipCropBtn">Skip — use full photo</button>
+      <button class="btn btn-secondary" id="retakeBtn">Retake</button>
+    </div>
+  `;
+  const imgEl = $("#cropImage");
+  let cropper = new Cropper(imgEl, { viewMode: 1, autoCropArea: 0.85, background: false, movable: false, zoomable: false, dragMode: "crop" });
+
+  const finish = async (dataUrl) => {
+    cropper.destroy();
+    cropper = null;
+    const finalDataUrl = await compressImage(dataUrl);
+    if (captureStage === "back") {
+      pendingBackPhotoDataUrl = finalDataUrl;
+      await runExtractionAndShowReview();
+    } else {
+      pendingFrontPhotoDataUrl = finalDataUrl;
+      showBackPrompt();
+    }
+  };
+
+  $("#useCropBtn").addEventListener("click", () => {
+    const canvas = cropper.getCroppedCanvas();
+    finish(canvas.toDataURL("image/jpeg", 0.9));
+  });
+  $("#skipCropBtn").addEventListener("click", () => finish(rawDataUrl));
+  $("#retakeBtn").addEventListener("click", () => {
+    cropper.destroy();
+    cropper = null;
+    openCameraView(promptLabel);
   });
 }
 
@@ -235,7 +349,7 @@ function showBackPrompt() {
   `;
   $("#addBackBtn").addEventListener("click", () => {
     captureStage = "back";
-    $("#cameraInput").click();
+    openCameraView("Position the BACK of the card in frame");
   });
   $("#skipBackBtn").addEventListener("click", () => runExtractionAndShowReview());
 }
@@ -260,46 +374,6 @@ async function runExtractionAndShowReview() {
     $("#retryBtn").addEventListener("click", resetScanView);
   }
 }
-
-$("#cameraInput").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  e.target.value = "";
-  if (!file) return;
-
-  if (captureStage === "back") {
-    $("#scanContent").innerHTML = `<div class="status-msg"><div class="spinner"></div>Adding the back photo…</div>`;
-    try {
-      const rawDataUrl = await readFileAsDataUrl(file);
-      pendingBackPhotoDataUrl = await compressImage(rawDataUrl);
-      await runExtractionAndShowReview();
-    } catch (err) {
-      toast("Couldn't read that photo — try again");
-      showBackPrompt();
-    }
-    return;
-  }
-
-  if (!Settings.getApiKey()) {
-    toast("Add your API key in Settings first");
-    showView("view-settings");
-    return;
-  }
-
-  showView("view-scan");
-  $("#scanContent").innerHTML = `<div class="status-msg"><div class="spinner"></div>Processing photo…</div>`;
-
-  try {
-    const rawDataUrl = await readFileAsDataUrl(file);
-    pendingFrontPhotoDataUrl = await compressImage(rawDataUrl);
-    showBackPrompt();
-  } catch (err) {
-    $("#scanContent").innerHTML = `
-      <div class="status-msg error">⚠ Couldn't read that photo.</div>
-      <button class="btn btn-secondary" id="retryBtn">Try again</button>
-    `;
-    $("#retryBtn").addEventListener("click", resetScanView);
-  }
-});
 
 async function renderReviewForm(existing) {
   const f = existing || pendingFields || {};
