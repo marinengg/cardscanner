@@ -43,11 +43,18 @@ a private repo needs a paid GitHub plan):
 
 ## 4. Scanning, grouping and searching
 
-- **Scan tab** → Take photo → point at the front of a business card. The app then asks if the
-  card has anything useful on the back (extra numbers, a second language, a QR code) — scan it
-  too or skip. Either way you land on an editable form — fix anything it got wrong, then Save.
-  Both photos (if you scanned a back) are read together, so details found only on the back still
-  end up in the card's fields.
+- **Scan tab** → Take photo opens the camera **inside the app** (defaults to the back/rear
+  camera — no more manually flipping it every time; a 🔄 button is there if you ever need to
+  switch anyway). Line up the card and tap the shutter.
+- After each photo you get an optional **crop step** — drag the corners to trim out the
+  background, or tap "Skip — use full photo" if you don't want to bother. A "Retake" button is
+  there too if the shot didn't come out right.
+- The app then asks if the card has anything useful on the back (extra numbers, a second
+  language, a QR code) — scan it too (camera + crop again) or skip. Either way you land on an
+  editable form — fix anything it got wrong, then Save. Both photos (if you scanned a back) are
+  read together, so details found only on the back still end up in the card's fields.
+- If camera access isn't available or you'd rather not use it, there's a gallery icon to pick an
+  existing photo instead — it goes through the same crop step.
 - That form includes a **Group / category** field, pre-filled with a suggestion (e.g. "Shipyard",
   "Vendor / Supplier", "Client") based on the card's company/title. Accept it, pick a different
   existing group from the dropdown, or just type a new name to create your own category — nothing
@@ -78,3 +85,10 @@ app, or uninstalling it, deletes the cards stored on that device.
 - There's no cloud sync between devices by design — use Export/Import to move data around.
 - Voice search uses Chrome's built-in speech recognition; you'll be asked for microphone
   permission the first time you use it.
+- The in-app camera uses your phone's camera hardware directly; you'll be asked for camera
+  permission the first time you tap "Take photo" — allow it, or use the gallery-icon fallback.
+- **Updating the app:** whenever any of `app.js`, `index.html`, `styles.css`, `manifest.json`, or
+  an icon changes, `service-worker.js`'s `CACHE_NAME` value must also change (e.g. v2 → v3) in
+  that same update — that's what makes your phone notice there's a new version instead of
+  quietly keeping the old cached files. Replace whichever files changed plus `service-worker.js`
+  itself, then fully close and reopen the app once so Chrome picks it up right away.
