@@ -106,9 +106,12 @@ async function getGroupOptions() {
 
 /* ---------- Claude API call ---------- */
 
-function buildExtractionPrompt(existingGroups) {
+function buildExtractionPrompt(existingGroups, hasBack) {
   const groupsList = existingGroups.length ? existingGroups.join(", ") : "(none yet)";
-  return `You are reading a photo of a single business card. Extract the information into strict JSON only — no markdown fences, no commentary, just a JSON object with exactly these keys:
+  const sideNote = hasBack
+    ? "You are given two photos of the same business card: the front, then the back. Combine information from both sides into one set of fields — if a phone, email, address, or other detail appears only on the back, still include it."
+    : "You are reading a photo of one side of a business card.";
+  return `${sideNote} Extract the information into strict JSON only — no markdown fences, no commentary, just a JSON object with exactly these keys:
 
 {
   "name": "",
@@ -126,7 +129,7 @@ function buildExtractionPrompt(existingGroups) {
 Rules:
 - "phones" and "emails" are arrays of strings (can be empty).
 - "notes" is for anything else useful on the card (tagline, secondary role, social handles) that doesn't fit other fields.
-- "raw_text" is every line of text visible on the card, newline separated, exactly as printed.
+- "raw_text" is every line of text visible on the card (both sides, if two photos were given), newline separated, exactly as printed.
 - "suggested_group" is a short category for organizing this contact (e.g. "Shipyard", "Vendor / Supplier",
   "Client", "Classification Society"). Categories already in use: ${groupsList}. Reuse one of those if it
   clearly fits the company/title/notes on this card. Only propose a new short category name (2-3 words,
@@ -135,12 +138,20 @@ Rules:
 - Output only the JSON object, nothing else.`;
 }
 
-async function extractCardFields(base64Jpeg) {
+async function extractCardFields(frontBase64Jpeg, backBase64Jpeg) {
   const apiKey = Settings.getApiKey();
   if (!apiKey) throw new Error("NO_API_KEY");
 
   const existingGroups = await getGroupOptions();
-  const prompt = buildExtractionPrompt(existingGroups);
+  const prompt = buildExtractionPrompt(existingGroups, !!backBase64Jpeg);
+
+  const content = [
+    { type: "image", source: { type: "base64", media_type: "image/jpeg", data: frontBase64Jpeg } }
+  ];
+  if (backBase64Jpeg) {
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: backBase64Jpeg } });
+  }
+  content.push({ type: "text", text: prompt });
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -153,13 +164,7 @@ async function extractCardFields(base64Jpeg) {
     body: JSON.stringify({
       model: Settings.getModel(),
       max_tokens: 1024,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Jpeg } },
-          { type: "text", text: prompt }
-        ]
-      }]
+      messages: [{ role: "user", content }]
     })
   });
 
@@ -193,11 +198,15 @@ async function extractCardFields(base64Jpeg) {
 
 /* ---------- SCAN VIEW ---------- */
 
-let pendingPhotoDataUrl = null;
+let captureStage = null; // "front" | "back" — which photo cameraInput's next result is for
+let pendingFrontPhotoDataUrl = null;
+let pendingBackPhotoDataUrl = null;
 let pendingFields = null;
 
 function resetScanView() {
-  pendingPhotoDataUrl = null;
+  captureStage = null;
+  pendingFrontPhotoDataUrl = null;
+  pendingBackPhotoDataUrl = null;
   pendingFields = null;
   $("#scanContent").innerHTML = `
     <div class="status-msg">
@@ -206,28 +215,38 @@ function resetScanView() {
     </div>
     <button class="btn btn-primary" id="takePhotoBtn">Take photo</button>
   `;
-  $("#takePhotoBtn").addEventListener("click", () => $("#cameraInput").click());
+  $("#takePhotoBtn").addEventListener("click", () => {
+    if (!Settings.getApiKey()) {
+      toast("Add your API key in Settings first");
+      showView("view-settings");
+      return;
+    }
+    captureStage = "front";
+    $("#cameraInput").click();
+  });
 }
 
-$("#cameraInput").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  e.target.value = "";
-  if (!file) return;
+function showBackPrompt() {
+  $("#scanContent").innerHTML = `
+    <img class="card-photo-preview" src="${pendingFrontPhotoDataUrl}">
+    <div class="hint">Front captured. Does this card have anything useful on the back (extra numbers, a second language, a QR code)?</div>
+    <button class="btn btn-primary" id="addBackBtn">Scan the back too</button>
+    <button class="btn btn-secondary" id="skipBackBtn" style="margin-top:10px;">Continue with just the front</button>
+  `;
+  $("#addBackBtn").addEventListener("click", () => {
+    captureStage = "back";
+    $("#cameraInput").click();
+  });
+  $("#skipBackBtn").addEventListener("click", () => runExtractionAndShowReview());
+}
 
-  if (!Settings.getApiKey()) {
-    toast("Add your API key in Settings first");
-    showView("view-settings");
-    return;
-  }
-
-  showView("view-scan");
+async function runExtractionAndShowReview() {
   $("#scanContent").innerHTML = `<div class="status-msg"><div class="spinner"></div>Reading the card…</div>`;
-
   try {
-    const rawDataUrl = await readFileAsDataUrl(file);
-    const compressed = await compressImage(rawDataUrl);
-    pendingPhotoDataUrl = compressed;
-    const fields = await extractCardFields(dataUrlToBase64(compressed));
+    const fields = await extractCardFields(
+      dataUrlToBase64(pendingFrontPhotoDataUrl),
+      pendingBackPhotoDataUrl ? dataUrlToBase64(pendingBackPhotoDataUrl) : null
+    );
     pendingFields = fields;
     await renderReviewForm();
   } catch (err) {
@@ -240,11 +259,52 @@ $("#cameraInput").addEventListener("change", async (e) => {
     `;
     $("#retryBtn").addEventListener("click", resetScanView);
   }
+}
+
+$("#cameraInput").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+
+  if (captureStage === "back") {
+    $("#scanContent").innerHTML = `<div class="status-msg"><div class="spinner"></div>Adding the back photo…</div>`;
+    try {
+      const rawDataUrl = await readFileAsDataUrl(file);
+      pendingBackPhotoDataUrl = await compressImage(rawDataUrl);
+      await runExtractionAndShowReview();
+    } catch (err) {
+      toast("Couldn't read that photo — try again");
+      showBackPrompt();
+    }
+    return;
+  }
+
+  if (!Settings.getApiKey()) {
+    toast("Add your API key in Settings first");
+    showView("view-settings");
+    return;
+  }
+
+  showView("view-scan");
+  $("#scanContent").innerHTML = `<div class="status-msg"><div class="spinner"></div>Processing photo…</div>`;
+
+  try {
+    const rawDataUrl = await readFileAsDataUrl(file);
+    pendingFrontPhotoDataUrl = await compressImage(rawDataUrl);
+    showBackPrompt();
+  } catch (err) {
+    $("#scanContent").innerHTML = `
+      <div class="status-msg error">⚠ Couldn't read that photo.</div>
+      <button class="btn btn-secondary" id="retryBtn">Try again</button>
+    `;
+    $("#retryBtn").addEventListener("click", resetScanView);
+  }
 });
 
 async function renderReviewForm(existing) {
   const f = existing || pendingFields || {};
-  const photo = existing ? existing.imageDataUrl : pendingPhotoDataUrl;
+  const photo = existing ? existing.imageDataUrl : pendingFrontPhotoDataUrl;
+  const backPhoto = existing ? (existing.backImageDataUrl || null) : pendingBackPhotoDataUrl;
   const groupValue = existing ? (existing.group || "") : (pendingFields && pendingFields.suggestedGroup) || "";
   const groupOptions = await getGroupOptions();
   const groupHint = !existing && groupValue
@@ -253,6 +313,7 @@ async function renderReviewForm(existing) {
 
   $("#scanContent").innerHTML = `
     ${photo ? `<img class="card-photo-preview" src="${photo}">` : ""}
+    ${backPhoto ? `<img class="card-photo-preview" src="${backPhoto}" style="margin-top:-8px;">` : ""}
     <div class="hint">Check the details below — fix anything the scan got wrong, then save.</div>
     <div class="field"><label>Name</label><input id="f_name" value="${escapeHtml(f.name)}"></div>
     <div class="field"><label>Title</label><input id="f_title" value="${escapeHtml(f.title)}"></div>
@@ -271,7 +332,7 @@ async function renderReviewForm(existing) {
     <button class="btn btn-primary" id="saveCardBtn">Save card</button>
     <button class="btn btn-secondary" id="discardBtn" style="margin-top:10px;">Discard &amp; rescan</button>
   `;
-  $("#saveCardBtn").addEventListener("click", () => saveReviewedCard(existing ? existing.id : null, photo));
+  $("#saveCardBtn").addEventListener("click", () => saveReviewedCard(existing ? existing.id : null, photo, backPhoto));
   $("#discardBtn").addEventListener("click", resetScanView);
 }
 
@@ -289,13 +350,14 @@ function readReviewForm() {
   };
 }
 
-async function saveReviewedCard(existingId, photoDataUrl) {
+async function saveReviewedCard(existingId, photoDataUrl, backPhotoDataUrl) {
   const fields = readReviewForm();
   const card = {
     id: existingId || uid(),
     createdAt: existingId ? (await CardDB.get(existingId))?.createdAt || new Date().toISOString() : new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     imageDataUrl: photoDataUrl || null,
+    backImageDataUrl: backPhotoDataUrl || null,
     rawText: (pendingFields && pendingFields.rawText) || "",
     ...fields
   };
@@ -437,6 +499,7 @@ async function openCardDetail(id) {
 
   $("#detailContent").innerHTML = `
     ${card.imageDataUrl ? `<img class="card-photo-preview" src="${card.imageDataUrl}">` : ""}
+    ${card.backImageDataUrl ? `<img class="card-photo-preview" src="${card.backImageDataUrl}" style="margin-top:-8px;">` : ""}
     <h2 style="margin:0 0 4px;">${escapeHtml(card.name || "(no name)")}</h2>
     ${rows.map(([label, val]) => `
       <div class="field"><label>${label}</label><div style="padding:6px 0; white-space:pre-wrap;">${escapeHtml(val)}</div></div>
@@ -450,7 +513,8 @@ async function openCardDetail(id) {
   $("#editCardBtn").addEventListener("click", async () => {
     showView("view-scan");
     $("#topbarTitle").textContent = "Edit card";
-    pendingPhotoDataUrl = card.imageDataUrl;
+    pendingFrontPhotoDataUrl = card.imageDataUrl;
+    pendingBackPhotoDataUrl = card.backImageDataUrl || null;
     pendingFields = card;
     await renderReviewForm(card);
   });

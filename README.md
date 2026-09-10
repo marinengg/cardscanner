@@ -10,14 +10,20 @@ Anthropic's API to read the text off a card photo.
 ## 1. Put it online (needed once, ~1 minute)
 
 Android needs the app served over `https://` before it can be installed to the home screen.
-Easiest no-account option:
 
-1. Go to **https://app.netlify.com/drop** on your computer.
-2. Drag this whole `cardscanner` folder onto the page.
-3. It gives you a live link like `https://random-name-123.netlify.app` — that's your app's address.
+**Using GitHub Pages** (works with a repo you already have, must be a **public** repo — Pages on
+a private repo needs a paid GitHub plan):
 
-(If you'd rather use GitHub Pages, Vercel, or any other static host, that works too — it's just
-plain HTML/CSS/JS, no build step required.)
+1. Create a repo (e.g. `cardscanner`) and upload these files to its root via **Add file → Upload
+   files**.
+2. **Settings → Pages** → source = **Deploy from a branch**, branch = `main`, folder = `/ (root)`
+   → Save.
+3. After a minute, the same Settings → Pages screen shows your live link:
+   `https://<your-username>.github.io/cardscanner/`.
+
+**Or, zero-account alternative:** go to **https://app.netlify.com/drop**, drag this whole
+`cardscanner` folder onto the page, and it gives you a live link immediately — no repo needed.
+(Vercel or any other static host works too — it's plain HTML/CSS/JS, no build step required.)
 
 ## 2. Install it on your phone
 
@@ -37,8 +43,11 @@ plain HTML/CSS/JS, no build step required.)
 
 ## 4. Scanning, grouping and searching
 
-- **Scan tab** → Take photo → point at a business card. The app reads it and shows an editable
-  form — fix anything it got wrong, then Save.
+- **Scan tab** → Take photo → point at the front of a business card. The app then asks if the
+  card has anything useful on the back (extra numbers, a second language, a QR code) — scan it
+  too or skip. Either way you land on an editable form — fix anything it got wrong, then Save.
+  Both photos (if you scanned a back) are read together, so details found only on the back still
+  end up in the card's fields.
 - That form includes a **Group / category** field, pre-filled with a suggestion (e.g. "Shipyard",
   "Vendor / Supplier", "Client") based on the card's company/title. Accept it, pick a different
   existing group from the dropdown, or just type a new name to create your own category — nothing
