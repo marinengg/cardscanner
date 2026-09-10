@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1e3a5f">
+<title>Card Scanner</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+
+  <header class="topbar">
+    <h1 id="topbarTitle">Card Scanner</h1>
+  </header>
+
+  <!-- LIST VIEW -->
+  <section class="view active" id="view-list">
+    <div class="search-row">
+      <input type="text" id="searchInput" placeholder="Search cards (name, company, phone...)">
+      <button class="mic-btn" id="micBtn" title="Voice search" aria-label="Voice search">🎤</button>
+    </div>
+    <div class="group-chips" id="groupChips"></div>
+    <div id="cardListContainer">
+      <div class="empty-state">Loading…</div>
+    </div>
+  </section>
+
+  <!-- SCAN VIEW -->
+  <section class="view" id="view-scan">
+    <div id="scanContent">
+      <div class="status-msg">
+        <div>Tap below to photograph a business card.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CARD DETAIL / EDIT VIEW -->
+  <section class="view" id="view-detail">
+    <div id="detailContent"></div>
+  </section>
+
+  <!-- SETTINGS VIEW -->
+  <section class="view" id="view-settings">
+    <div class="section-title">Anthropic API key</div>
+    <div class="field">
+      <label for="apiKeyInput">API key</label>
+      <input type="password" id="apiKeyInput" placeholder="sk-ant-...">
+    </div>
+    <div class="hint">
+      Stored only in this browser on this device — never sent anywhere except directly to Anthropic when scanning a card.
+      Get a key from your Anthropic Console (console.anthropic.com → API Keys).
+    </div>
+    <div class="field">
+      <label for="modelSelect">Extraction model</label>
+      <select id="modelSelect">
+        <option value="claude-haiku-4-5-20251001">Haiku 4.5 — fastest &amp; cheapest (recommended)</option>
+        <option value="claude-sonnet-5">Sonnet 5 — more accurate, costs more</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" id="saveSettingsBtn">Save settings</button>
+
+    <div class="section-title">Backup &amp; transfer</div>
+    <div class="hint">
+      All your cards live only on this device. Export a backup file to move them to another
+      phone (install this same app there, then Import the file).
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="exportBtn">Export backup</button>
+      <button class="btn btn-secondary" id="importBtn">Import backup</button>
+    </div>
+    <input type="file" id="importFile" accept="application/json" style="display:none">
+
+    <div class="section-title">About</div>
+    <div class="hint">
+      Card Scanner v1 — a local-first business card scanner and search tool. No account, no server, no cloud storage of your cards.
+    </div>
+  </section>
+
+  <nav class="bottombar">
+    <button class="nav-btn active" data-view="view-list"><span class="ic">🗂</span>Cards</button>
+    <button class="nav-btn" data-view="view-scan"><span class="ic">📷</span>Scan</button>
+    <button class="nav-btn" data-view="view-settings"><span class="ic">⚙</span>Settings</button>
+  </nav>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none">
+
+<script src="db.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
