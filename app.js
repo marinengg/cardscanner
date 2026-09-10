@@ -254,7 +254,11 @@ async function openCameraView(promptLabel) {
 
   try {
     activeStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: currentFacingMode } },
+      video: {
+        facingMode: { ideal: currentFacingMode },
+        width: { ideal: 4096 },
+        height: { ideal: 2160 }
+      },
       audio: false
     });
   } catch (err) {

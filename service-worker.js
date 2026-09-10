@@ -1,6 +1,6 @@
 // Minimal app-shell cache so the app installs and opens instantly.
 // Anything not in this list (including all api.anthropic.com calls) goes straight to the network.
-const CACHE_NAME = "cardscanner-shell-v4";
+const CACHE_NAME = "cardscanner-shell-v5";
 const SHELL_FILES = [
   "./",
   "./index.html",
